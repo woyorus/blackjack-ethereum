@@ -1,12 +1,12 @@
 pragma solidity ^0.4.23;
 
 contract Blackjack {
-    bool gameStarted = false;
-    bool gameFinished = false;
+    enum GameState { NotStarted, InProgress, Finished }
+    
+    GameState state = GameState.NotStarted;
 
     uint8 turnPointer;
-    bool turnInProgress;
-    uint8 turnScore = 0;
+    uint8 turnScore;
     
     uint8 constant playersPerTable = 3;
     
@@ -22,6 +22,13 @@ contract Blackjack {
     bool _tie;
     mapping (uint8 => uint8) scores;
     
+    struct Card {
+        uint8 suit;
+        uint8 rank;
+    }
+    
+    // -- Events --
+    
     event PlayerJoined(address player);
     event GameStarted();
     event Draws(address player, Card card);
@@ -29,9 +36,38 @@ contract Blackjack {
     event Tie();
     event Wins(address player);
     
-    struct Card {
-        uint8 suit;
-        uint8 rank;
+    // --
+    
+    modifier onlyNotStarted() {
+        require (
+            state == GameState.NotStarted,
+            "Action is performable only when game is not started yet"
+        );
+        _;
+    }
+    
+    modifier onlyInProgress() {
+        require (
+            state == GameState.InProgress,
+            "Action is performable only when game is in progress"
+        );
+        _;
+    }
+    
+    modifier onlyFinished() {
+        require (
+            state == GameState.Finished,
+            "Action is performable only when game is finished"
+        );
+        _;
+    }
+    
+    modifier onlyTurnTaker() {
+        require (
+            playerJoined(msg.sender) && playerIndex(msg.sender) == turnPointer,
+            "Only the player who's turn is now can do this"
+        );
+        _;
     }
 
     constructor() public {
@@ -45,12 +81,7 @@ contract Blackjack {
         // TODO: Shuffle the deck
     }
     
-    function winner() public view returns (address) {
-        require (
-            gameFinished,
-            "The game is not finished yet"
-        );
-        
+    function winner() onlyFinished public view returns (address) {
         if (_tie) {
             return 0x0;
         }
@@ -58,15 +89,10 @@ contract Blackjack {
         return players[_winner];
     }
     
-    function join() public {
-        require (
-            !gameStarted,
-            "Game is already started"
-        );
-        
+    function join() public onlyNotStarted {
         require (
             numPlayers < playersPerTable,
-            "All seats are occupied, start the game"
+            "All seats are already taken"
         );
         
         require (
@@ -80,8 +106,148 @@ contract Blackjack {
         scores[index] = 0;
         
         emit PlayerJoined(msg.sender);
+        
+        // Start the game if all seats are taken
+        if (numPlayers == playersPerTable) {
+            startGame();
+        }
     }
-
+    
+    function startGame() private onlyNotStarted {
+        require (
+            numPlayers == 3,
+            "Not all seats are taken yet, wait for others to join"
+        );
+        
+        state = GameState.InProgress;
+        turnPointer = 0; // first to come in player begins playing first
+        turnScore = 0;
+        
+        emit GameStarted();
+    }
+    
+    function take() onlyTurnTaker onlyInProgress public returns (uint8) {
+        // Take top card from the deck and place it on the table
+        Card memory c = deck[deckTopPtr];
+        deckTopPtr++;
+        table.push(c);
+        
+        turnScore += scoreForRank(c.rank);
+        scores[turnPointer] = turnScore;
+        
+        emit Draws(msg.sender, c);
+        
+        if (turnScore == 21) {
+            // We have a winner
+            _winner = turnPointer;
+            state = GameState.Finished;
+        } else if (turnScore > 21) {
+            // We have a looser
+            uint8 currentScore = turnScore;
+            nextTurn(); // modifies turnScore
+            return currentScore;
+        }
+        
+        return turnScore;
+    }
+    
+    function nextTurn() onlyTurnTaker onlyInProgress public {
+        if (allLost()) {
+            // The tie case
+            declareTie();
+            return;
+        }
+        
+        if (turnPointer == (numPlayers - 1)) {
+            // Last turn. Winner is the first highest score
+            declareWinner(computeWinner());
+            return;
+        }
+        
+        turnPointer++;
+        turnScore = 0;
+        
+        emit Turn(players[turnPointer - 1], players[turnPointer]);
+    }
+    
+    function declareTie() onlyInProgress private {
+        state = GameState.Finished;
+        _tie = true;
+        emit Tie();
+    }
+    
+    function declareWinner(uint8 winPlayerIndex) onlyInProgress private {
+        state = GameState.Finished;
+        _winner = winPlayerIndex;
+        emit Wins(players[winPlayerIndex]);
+    }
+    
+    function computeWinner() onlyInProgress private view returns (uint8) {
+        uint8 winningScore = 0;
+        uint8 candidate;
+        
+        for (uint8 i = 0; i < numPlayers; i++) {
+            if (scores[i] > winningScore) {
+                winningScore = scores[i];
+                candidate = i;
+            }
+        }
+        
+        return candidate;
+    }
+    
+    function whosTurn() onlyInProgress public view returns (address) {
+        return players[turnPointer];
+    }
+    
+    // -- Helpers -- //
+    
+    function scoreForRank(uint8 rank) private view returns (uint8) {
+        require (
+            rank >= 0 && rank < 9,
+            "Rank must be between 0 and 8"
+        );
+        
+        if (rank >= 0 && rank <= 4) {
+            // 6 to 10 card rank case: indicies have an offset of +6
+            return rank + 6;
+        } else if (rank >= 5 && rank <= 7) {
+            // Queen to King card rank case: indicies offset by -3
+            return rank - 3;
+        } else {
+            // Ace case: the score is either 1 or 10, whichever fits better
+            if (21 <= (turnScore + 10)) {
+                return 10;
+            } else {
+                return 1;
+            }
+        }
+    }
+    
+    function playerIndex(address _player) private view returns (int) {
+        for (uint8 i = 0; i < playersPerTable; i++) {
+            if (players[i] != 0x0 && players[i] == _player) {
+                return i;
+            }
+        }
+        
+        return -1; // not found
+    }
+    
+    function playerJoined(address _player) private view returns (bool) {
+        return playerIndex(_player) != -1;
+    }
+    
+    function allLost() private view returns (bool) {
+        bool result = true;
+        for (uint8 i = 0; i < numPlayers; i++) {
+            result = result && scores[i] <= 21;
+        }
+        return result;
+    }
+    
+    // -- Utility routines -- //
+    
     function getSuitString(uint8 suit) public pure returns (string) {
         require (
             suit >= 0 && suit < 4,
@@ -124,191 +290,5 @@ contract Blackjack {
         } else if (rank == 8) {
             return "Ace";
         }
-    }
-    
-    function scoreForRank(uint8 rank) public view returns (uint8) {
-        require (
-            rank >= 0 && rank < 9,
-            "Rank must be between 0 and 8"
-        );
-        
-        if (rank >= 0 && rank <= 4) {
-            // There's an offset by six between card index and it's actual rank
-            return rank + 6; 
-        } else if (rank == 5) { // jack
-            return 2;
-        } else if (rank == 6) { // queen
-            return 3;
-        } else if (rank == 7) { // king
-            return 4;
-        } else { // ace
-            if (21 <= (turnScore + 10)) {
-                return 10;
-            } else {
-                return 1;
-            }
-        }
-    }
-    
-    function playerIndex(address _player) private view returns (int) {
-        for (uint8 i = 0; i < playersPerTable; i++) {
-            if (players[i] != 0x0 && players[i] == _player) {
-                return i;
-            }
-        }
-        
-        return -1; // not found
-    }
-    
-    function playerJoined(address _player) private view returns (bool) {
-        return playerIndex(_player) != -1;
-    }
-    
-    function startGame() public {
-        require (
-            !gameStarted,
-            "Game already started"
-        );
-        
-        require (
-            numPlayers == 3,
-            "Not all seats are taken yet, wait for others to join"
-        );
-        
-        require (
-            msg.sender == players[0],
-            "Only the person who created the game can start it."
-        );
-        
-        gameStarted = true;
-        
-        turnPointer = 0;
-        turnInProgress = true;
-        
-        emit GameStarted();
-    }
-    
-    function more() public returns (uint8) {
-        require (
-            gameStarted,
-            "Game is not started yet"
-        );
-        
-        require (
-            turnInProgress,
-            "Turn is not in progress"
-        );
-        
-        require (
-            playerJoined(msg.sender) && playerIndex(msg.sender) == turnPointer,
-            "Only the player who's turn is now can do this"
-        );
-        
-        // Take top card from the deck and place it on the table
-        Card memory c = deck[deckTopPtr];
-        deckTopPtr++;
-        table.push(c);
-        
-        turnScore += scoreForRank(c.rank);
-        scores[turnPointer] = turnScore;
-        
-        emit Draws(msg.sender, c);
-        
-        if (turnScore == 21) {
-            // We have a winner
-            _winner = turnPointer;
-            gameFinished = true;
-        } else if (turnScore > 21) {
-            // We have a looser
-            nextTurn();
-        }
-        
-        return turnScore;
-    }
-    
-    function nextTurn() public {
-        require (
-            gameStarted,
-            "Game is not started yet"
-        );
-        
-        require (
-            turnInProgress,
-            "Turn is not in progress"
-        );
-        
-        require (
-            playerJoined(msg.sender) && playerIndex(msg.sender) == turnPointer,
-            "Only the player who's turn is now can do this"
-        );
-        
-        require (
-            !gameFinished,
-            "Game is already finished"
-        );
-        
-        if (allLost()) {
-            // The tie case
-            declareTie();
-            return;
-        }
-        
-        if (turnPointer == (numPlayers - 1)) {
-            // Last turn. Winner is the first highest score
-            declareWinner(computeWinner());
-            return;
-        }
-        
-        turnPointer++;
-        turnScore = 0;
-        
-        emit Turn(players[turnPointer - 1], players[turnPointer]);
-    }
-    
-    function declareTie() private {
-        gameFinished = true;
-        _tie = true;
-        emit Tie();
-    }
-    
-    function declareWinner(uint8 winPlayerIndex) private {
-        _winner = winPlayerIndex;
-        gameFinished = true;
-        emit Wins(players[winPlayerIndex]);
-    }
-    
-    function computeWinner() private view returns (uint8) {
-        uint8 winningScore = 0;
-        uint8 candidate;
-        
-        for (uint8 i = 0; i < numPlayers; i++) {
-            if (scores[i] > winningScore) {
-                winningScore = scores[i];
-                candidate = i;
-            }
-        }
-        
-        return candidate;
-    }
-    
-    function allLost() private view returns (bool) {
-        bool result = true;
-        for (uint8 i = 0; i < numPlayers; i++) {
-            result = result && scores[i] <= 21;
-        }
-    }
-    
-    function whosTurn() public view returns (address) {
-        require (
-            gameStarted,
-            "Game is not started yet"
-        );
-        
-        require (
-            turnInProgress,
-            "Turn is not in progress"
-        );
-        
-        return players[turnPointer];
     }
 }
