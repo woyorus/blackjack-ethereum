@@ -31,7 +31,7 @@ contract Blackjack {
     
     event PlayerJoined(address player);
     event GameStarted();
-    event Draws(address player, Card card);
+    event Draws(address player, uint8 newScore);
     event Turn(address prevPlayer, address nextPlayer);
     event Tie();
     event Wins(address player);
@@ -135,7 +135,7 @@ contract Blackjack {
         turnScore += scoreForRank(c.rank);
         scores[turnPointer] = turnScore;
         
-        emit Draws(msg.sender, c);
+        emit Draws(msg.sender, turnScore);
         
         if (turnScore == 21) {
             // We have a winner
@@ -239,9 +239,10 @@ contract Blackjack {
     }
     
     function allLost() private view returns (bool) {
-        bool result = true;
+        bool result = false;
         for (uint8 i = 0; i < numPlayers; i++) {
-            result = result && scores[i] <= 21;
+            uint8 score = scores[i];
+            result = result && !(score <= 21 && score > 0);
         }
         return result;
     }
