@@ -1,4 +1,4 @@
-pragma solidity ^0.4.23;
+pragma solidity ^0.4.24;
 
 contract Blackjack {
     enum GameState { NotStarted, InProgress, Finished }
@@ -145,7 +145,7 @@ contract Blackjack {
         } else if (turnScore > 21) {
             // We have a looser
             uint8 currentScore = turnScore;
-            Bust(msg.sender);
+            emit Bust(msg.sender);
             nextTurn(); // modifies turnScore
             return currentScore;
         }
