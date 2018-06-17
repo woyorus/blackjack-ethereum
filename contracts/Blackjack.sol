@@ -34,6 +34,7 @@ contract Blackjack {
     event Draws(address player, uint8 newScore);
     event Turn(address prevPlayer, address nextPlayer);
     event Tie();
+    event Bust(address player);
     event Wins(address player);
     
     // --
@@ -144,6 +145,7 @@ contract Blackjack {
         } else if (turnScore > 21) {
             // We have a looser
             uint8 currentScore = turnScore;
+            Bust(msg.sender);
             nextTurn(); // modifies turnScore
             return currentScore;
         }
@@ -187,7 +189,7 @@ contract Blackjack {
         uint8 candidate;
         
         for (uint8 i = 0; i < numPlayers; i++) {
-            if (scores[i] > winningScore) {
+            if (scores[i] > winningScore && scores[i] <= 21) {
                 winningScore = scores[i];
                 candidate = i;
             }
