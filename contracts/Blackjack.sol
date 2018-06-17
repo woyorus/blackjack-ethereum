@@ -1,4 +1,4 @@
-pragma solidity ^0.4.24;
+pragma solidity ^0.4.23;
 
 contract Blackjack {
     enum GameState { NotStarted, InProgress, Finished }
@@ -79,7 +79,28 @@ contract Blackjack {
             }
         }
         
-        // TODO: Shuffle the deck
+        // TODO: Don't shuffle the deck in constructor, pick a random card from
+        // the deck on each take() instead
+        shuffleDeck();
+    }
+    
+    function shuffleDeck() private {
+        for (uint64 i = uint64(deck.length - 1); i > 0; i--) {
+            uint64 index = random(i+1);   
+            Card memory a = deck[index];
+            deck[index] = deck[i];
+            deck[i] = a;
+        }
+    }
+    
+    // TODO: Reimplement this, the source of entropy is bad
+    uint64 _seed = 128;
+    function random(uint64 upper) public returns (uint64 randomNumber) {
+        if (upper == 0) {
+            upper = 100000000;
+        }
+        _seed = uint64(keccak256(keccak256(blockhash(block.number), _seed), now));
+        return _seed % upper;
     }
     
     function winner() onlyFinished public view returns (address) {
