@@ -26,9 +26,7 @@ contract Blackjack {
         uint8 suit;
         uint8 rank;
     }
-    
-    // -- Events --
-    
+        
     event PlayerJoined(address player);
     event GameStarted();
     event Draws(address player, uint8 newScore);
@@ -36,9 +34,7 @@ contract Blackjack {
     event Tie();
     event Bust(address player);
     event Wins(address player);
-    
-    // --
-    
+        
     modifier onlyNotStarted() {
         require (
             state == GameState.NotStarted,
