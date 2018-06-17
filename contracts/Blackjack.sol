@@ -96,11 +96,12 @@ contract Blackjack {
     // TODO: Reimplement this, the source of entropy is bad
     uint64 _seed = 128;
     function random(uint64 upper) public returns (uint64 randomNumber) {
-        if (upper == 0) {
-            upper = 100000000;
+        uint64 _upper = upper;
+        if (_upper == 0) {
+            _upper = 100000000;
         }
         _seed = uint64(keccak256(keccak256(blockhash(block.number), _seed), now));
-        return _seed % upper;
+        return _seed % _upper;
     }
     
     function winner() onlyFinished public view returns (address) {
@@ -161,8 +162,7 @@ contract Blackjack {
         
         if (turnScore == 21) {
             // We have a winner
-            _winner = turnPointer;
-            state = GameState.Finished;
+            declareWinner(uint8(playerIndex(msg.sender)));
         } else if (turnScore > 21) {
             // We have a looser
             uint8 currentScore = turnScore;
